@@ -1,0 +1,24 @@
+# Environment variables
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+env/
+.venv/
+
+# Project Specific
+faiss_index/
+generated_images/
+*.pdf
+*.docx
+*.txt
+
+# Streamlit
+.streamlit/
+
+# OS
+.DS_Store
+Thumbs.db
