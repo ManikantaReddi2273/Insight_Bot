@@ -14,7 +14,9 @@ faiss_index/
 generated_images/
 *.pdf
 *.docx
+# Ignore all txt files except requirements.txt
 *.txt
+!requirements.txt
 
 # Streamlit
 .streamlit/

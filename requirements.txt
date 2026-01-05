@@ -1,0 +1,13 @@
+streamlit
+requests
+python-dotenv
+pypdf
+python-docx
+faiss-cpu
+sentence-transformers
+langchain-community
+langchain
+langchain-text-splitters
+langchain-huggingface
+pillow
+huggingface_hub
