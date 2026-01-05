@@ -1,4 +1,5 @@
 import streamlit as st
+import streamlit.components.v1 as components
 import json
 import requests
 import os
@@ -11,7 +12,7 @@ from image_gen import generate_image_hf
 load_dotenv()
 
 # Initialize RAG Engine lazily
-@st.cache_resource
+@st.cache_resource(show_spinner=False)
 def get_rag_engine():
     from rag_engine import RAGEngine
     return RAGEngine()
@@ -61,6 +62,7 @@ def search_web(query):
         return f"Error during search: {e}"
 
 def render_sidebar(messages):
+    from state import create_new_session
     st.sidebar.markdown("""
         <div style='text-align: center; padding: 1rem 0;'>
             <h2 style='color: #6366f1; margin: 0;'>🧠 InsightBot</h2>
@@ -72,9 +74,7 @@ def render_sidebar(messages):
     if st.sidebar.button("➕ New Chat Session", use_container_width=True):
         session_id = get_timestamp()
         st.session_state.current_session = session_id
-        st.session_state.all_sessions[session_id] = [
-            {"role": "assistant", "content": "Welcome to **InsightBot**. How can I help you today?"}
-        ]
+        st.session_state.all_sessions[session_id] = create_new_session()
         st.rerun()
 
     st.sidebar.markdown("---")
@@ -136,6 +136,7 @@ def render_header():
             line-height: 1.6;
             font-size: 1rem;
             box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1);
+            position: relative; /* For the copy button positioning */
         }
 
         .user-bubble {
@@ -151,6 +152,38 @@ def render_header():
             margin-right: auto;
             border-bottom-left-radius: 0.2rem;
             border: 1px solid #334155;
+        }
+
+        /* Copy Button Styling */
+        .copy-btn {
+            background: none;
+            border: none;
+            color: #94a3b8;
+            cursor: pointer;
+            font-size: 0.8rem;
+            position: absolute;
+            top: 10px;
+            right: 15px;
+            opacity: 0;
+            transition: all 0.2s ease-in-out;
+            border-radius: 6px;
+            padding: 4px 8px;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .chat-bubble:hover .copy-btn {
+            opacity: 1;
+        }
+
+        .copy-btn:hover {
+            color: #6366f1;
+            background: rgba(99, 102, 241, 0.1);
+        }
+
+        .copy-btn.copied {
+            color: #10b981 !important;
         }
 
         /* File Chip Styling (ChatGPT Style) */
@@ -250,6 +283,43 @@ def render_header():
             transform: translateY(-2px);
         }
     </style>
+
+    <script>
+        function copyToClipboard(elementId) {
+            const textElement = document.getElementById(elementId);
+            if (!textElement) return;
+            
+            // Get the text to copy
+            const textToCopy = textElement.innerText;
+            
+            // Fallback copy method for older/insecure environments
+            const textArea = document.createElement("textarea");
+            textArea.value = textToCopy;
+            document.body.appendChild(textArea);
+            textArea.select();
+            
+            try {
+                const successful = document.execCommand('copy');
+                if (successful) {
+                    // Find the button and show feedback
+                    const btn = event.target.closest('.copy-btn');
+                    if (btn) {
+                        const originalContent = btn.innerHTML;
+                        btn.innerHTML = "✓ Copied";
+                        btn.classList.add("copied");
+                        setTimeout(() => {
+                            btn.innerHTML = originalContent;
+                            btn.classList.remove("copied");
+                        }, 2000);
+                    }
+                }
+            } catch (err) {
+                console.error('Copy fallback failed', err);
+            }
+            
+            document.body.removeChild(textArea);
+        }
+    </script>
     """, unsafe_allow_html=True)
     
     st.markdown("<h1 class='main-header'>InsightBot</h1>", unsafe_allow_html=True)
@@ -258,7 +328,7 @@ def render_header():
 
 def render_messages(messages):
     with st.container():
-        for msg in messages:
+        for i, msg in enumerate(messages):
             # Skip internal messages (unless they contain generated media)
             if msg.get("role") == "tool" and "image_path" not in msg:
                 continue
@@ -281,21 +351,108 @@ def render_messages(messages):
 
             # Show Generated Images
             if "image_path" in msg and os.path.exists(msg["image_path"]):
-                st.image(msg["image_path"], use_container_width=True, caption="InsightBot's Visualization")
+                st.image(msg["image_path"], use_column_width=True, caption="InsightBot's Visualization")
 
             if not msg.get("content"):
                 continue
 
+            # Special handling for welcome message - display as centered header
+            if i == 0 and msg.get("role") == "assistant" and "Welcome to" in msg.get("content", ""):
+                st.markdown(f"""
+                <div style="text-align: center; padding: 2rem 0; margin-bottom: 1rem;">
+                    <p style="color: #ffffff; font-size: 1.3rem; font-weight: 500; margin: 0;">
+                        {msg["content"].replace("**", "")}
+                    </p>
+                </div>
+                """, unsafe_allow_html=True)
+                continue
+
             bubble_type = "user-bubble" if msg["role"] == "user" else "bot-bubble"
-            st.markdown(f"""
+            content_escaped = msg["content"].replace("`", "\\`").replace("$", "\\$")
+            
+            # Using components.html for proper JS execution
+            bubble_html = f"""
+            <style>
+                body {{ margin: 0; padding: 0; font-family: 'Inter', sans-serif; background: transparent; }}
+                .chat-bubble {{
+                    padding: 1rem 1.5rem;
+                    border-radius: 1.2rem;
+                    line-height: 1.6;
+                    font-size: 1rem;
+                    box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1);
+                    position: relative;
+                }}
+                .user-bubble {{
+                    background: #6366f1;
+                    color: white;
+                }}
+                .bot-bubble {{
+                    background: #1e293b;
+                    color: #f1f5f9;
+                    border: 1px solid #334155;
+                }}
+                .copy-btn {{
+                    background: none;
+                    border: none;
+                    color: #94a3b8;
+                    cursor: pointer;
+                    font-size: 0.8rem;
+                    position: absolute;
+                    top: 10px;
+                    right: 15px;
+                    border-radius: 6px;
+                    padding: 4px 8px;
+                    transition: all 0.2s ease-in-out;
+                }}
+                .copy-btn:hover {{
+                    color: #6366f1;
+                    background: rgba(99, 102, 241, 0.1);
+                }}
+                .copy-btn.copied {{
+                    color: #10b981 !important;
+                }}
+            </style>
             <div class="chat-bubble {bubble_type}">
-                {msg["content"]}
+                <button class="copy-btn" onclick="copyText(this)">📋 Copy</button>
+                <div class="msg-content">{content_escaped}</div>
             </div>
-            """, unsafe_allow_html=True)
+            <script>
+                function copyText(btn) {{
+                    const text = btn.parentElement.querySelector('.msg-content').innerText;
+                    const textArea = document.createElement("textarea");
+                    textArea.value = text;
+                    document.body.appendChild(textArea);
+                    textArea.select();
+                    document.execCommand('copy');
+                    document.body.removeChild(textArea);
+                    btn.innerHTML = "✓ Copied";
+                    btn.classList.add("copied");
+                    setTimeout(() => {{
+                        btn.innerHTML = "📋 Copy";
+                        btn.classList.remove("copied");
+                    }}, 2000);
+                }}
+            </script>
+            """
+            # Estimate height based on content length
+            estimated_height = max(80, min(400, 60 + len(msg["content"]) // 3))
+            components.html(bubble_html, height=estimated_height)
             
     # Show Pending Files (Files uploaded but not yet "sent" with a prompt)
-    if st.session_state.pending_files:
-        for file_name in st.session_state.pending_files:
+    session_data = st.session_state.all_sessions[st.session_state.current_session]
+    
+    # Get all files that have already been attached to messages
+    attached_files = set()
+    for msg in messages:
+        if "files" in msg:
+            attached_files.update(msg["files"])
+    
+    # Only show files as pending if they're uploaded but NOT yet attached to any message
+    uploaded_files = session_data.get("uploaded_files", [])
+    truly_pending = [f for f in uploaded_files if f not in attached_files]
+    
+    if truly_pending:
+        for file_name in truly_pending:
             ext = file_name.split('.')[-1].upper() if '.' in file_name else 'FILE'
             st.markdown(f"""
             <div class="file-chip" style="opacity: 0.8; border-style: dashed;">
@@ -308,57 +465,82 @@ def render_messages(messages):
             """, unsafe_allow_html=True)
 
 def handle_chat_input(messages):
-    # Unified ChatGPT-style Input Bar
-    c1, c2 = st.columns([0.1, 0.9])
+    # Get current session data
+    session_data = st.session_state.all_sessions[st.session_state.current_session]
+    uploaded_files_list = session_data.get("uploaded_files", [])
+    pending_files_list = session_data.get("pending_files", [])
     
-    with c1:
-        # Subtle attachment button
-        with st.popover("📎", help="Add documents"):
-            st.markdown("#### 📂 Knowledge Source")
-            uploaded_files = st.file_uploader(
-                "Upload", 
-                type=['pdf', 'docx', 'txt'], 
-                accept_multiple_files=True,
-                key="chat_file_uploader",
-                label_visibility="collapsed"
-            )
-            
-            if uploaded_files:
-                re = get_rag_engine()
-                for uf in uploaded_files:
-                    if uf.name not in st.session_state.uploaded_files:
-                        with st.status(f"Indexing {uf.name}...", expanded=False) as status:
-                            success, msg = re.process_file(uf)
-                            if success:
-                                st.session_state.uploaded_files.append(uf.name)
-                                st.session_state.pending_files.append(uf.name)
-                                status.update(label=f"✅ {uf.name} Ready", state="complete")
-                            else:
-                                st.error(msg)
-                st.rerun() # Refresh to show chips in pending state
-            
-            if st.session_state.uploaded_files:
-                st.caption("Knowledge Base:")
-                for f in st.session_state.uploaded_files:
-                    st.text(f"✔ {f}")
-                if st.button("🗑️ Clear All Content", use_container_width=True):
-                    st.session_state.vector_store = None
-                    st.session_state.uploaded_files = []
-                    st.session_state.pending_files = []
-                    st.rerun()
+    # ChatGPT-style Layout: Attachment button next to Input
+    # We use a container to keep them together at the bottom
+    input_container = st.container()
+    
+    with input_container:
+        col1, col2 = st.columns([0.08, 0.92])
+        
+        with col1:
+            # The "Plus" or "Clip" button for attachments
+            with st.popover("📎", help="Add documents (PDF, DOCX, TXT)"):
+                st.markdown("### 📂 Add Knowledge")
+                # Use session-specific key so each chat has isolated upload state
+                uploader_key = f"file_uploader_{st.session_state.current_session.replace(' ', '_').replace(':', '_').replace('-', '_')}"
+                uploaded_files = st.file_uploader(
+                    "Upload files", 
+                    type=['pdf', 'docx', 'txt'], 
+                    accept_multiple_files=True,
+                    key=uploader_key,
+                    label_visibility="collapsed"
+                )
+                
+                if uploaded_files:
+                    re = get_rag_engine()
+                    processed_any = False
+                    for uf in uploaded_files:
+                        if uf.name not in uploaded_files_list:
+                            with st.status(f"Indexing {uf.name}...", expanded=False) as status:
+                                vs, msg = re.process_file(uf, session_data)
+                                if vs:
+                                    session_data["uploaded_files"].append(uf.name)
+                                    session_data["pending_files"].append(uf.name)
+                                    status.update(label=f"✅ {uf.name} Ready", state="complete")
+                                    processed_any = True
+                                else:
+                                    st.error(msg)
+                    
+                    if processed_any:
+                        st.rerun()
 
-    with c2:
-        prompt = st.chat_input("Ask a question about your files or anything else...")
+                if uploaded_files_list:
+                    st.divider()
+                    st.caption("Indexed Documents:")
+                    for f in uploaded_files_list:
+                        st.text(f"✔ {f}")
+                    
+                    if st.button("🗑️ Clear All", use_container_width=True):
+                        session_data["vector_store"] = None
+                        session_data["uploaded_files"] = []
+                        session_data["pending_files"] = []
+                        st.rerun()
+
+        with col2:
+            prompt = st.chat_input("Ask InsightBot about your files or search the web...")
 
     if prompt:
         new_msg = {"role": "user", "content": prompt}
-        # If there are pending files, attach them to this user prompt
-        if st.session_state.pending_files:
-            new_msg["files"] = st.session_state.pending_files.copy()
-            st.session_state.pending_files = []
+        
+        # Only attach files that are uploaded but NOT yet attached to any previous message
+        attached_files = set()
+        for msg in messages:
+            if "files" in msg:
+                attached_files.update(msg["files"])
+        
+        uploaded = session_data.get("uploaded_files", [])
+        new_files = [f for f in uploaded if f not in attached_files]
+        
+        if new_files:
+            new_msg["files"] = new_files.copy()
             
         messages.append(new_msg)
-        st.session_state.all_sessions[st.session_state.current_session] = messages
+        session_data["messages"] = messages
         st.rerun()
 
 def handle_interaction(payload, messages):
@@ -457,9 +639,13 @@ def handle_interaction(payload, messages):
                 })
                 return f"I've generated a visualization for you: **{image_prompt}**"
         
-        # If no tool called, we have the content, but let's stream it for better UX
-        payload["stream"] = True
-        return stream_response(payload)
+        # Optimization: We already have the full content from the first request.
+        # Returning it directly is faster and more reliable than starting a new stream.
+        content = message.get("content")
+        if content:
+            return content
+        
+        return "I couldn't generate a text response."
 
     except Exception as e:
         st.error(f"❌ Processing Error: {e}")
